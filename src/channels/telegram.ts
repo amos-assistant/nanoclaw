@@ -1,4 +1,8 @@
-import { Api, Bot } from 'grammy';
+import fs from 'fs';
+import path from 'path';
+import https from 'https';
+import { Api, Bot, InputFile } from 'grammy';
+import { GROUPS_DIR } from '../config.js';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
@@ -212,7 +216,46 @@ export class TelegramChannel implements Channel {
       });
     };
 
-    this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
+    this.bot.on('message:photo', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+      try {
+        // Download the largest available photo size
+        const photo = ctx.message.photo[ctx.message.photo.length - 1];
+        const file = await ctx.api.getFile(photo.file_id);
+        if (file.file_path) {
+          const fileUrl = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+          const saveDir = path.join(
+            GROUPS_DIR,
+            group.folder,
+            'received_photos',
+          );
+          fs.mkdirSync(saveDir, { recursive: true });
+          const filename = `photo_${Date.now()}.jpg`;
+          const savePath = path.join(saveDir, filename);
+          await new Promise<void>((resolve, reject) => {
+            const out = fs.createWriteStream(savePath);
+            https
+              .get(fileUrl, (res) => {
+                res.pipe(out);
+                out.on('finish', resolve);
+              })
+              .on('error', reject);
+          });
+          const containerPath = `/workspace/group/received_photos/${filename}`;
+          const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
+          storeNonText(ctx, `[Photo saved: ${containerPath}]${caption}`);
+          return;
+        }
+      } catch (err) {
+        logger.warn(
+          { err },
+          'Failed to download Telegram photo, falling back to placeholder',
+        );
+      }
+      storeNonText(ctx, '[Photo]');
+    });
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
     this.bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
     this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
@@ -291,6 +334,47 @@ export class TelegramChannel implements Channel {
       this.bot.stop();
       this.bot = null;
       logger.info('Telegram bot stopped');
+    }
+  }
+
+  async sendDocument(
+    jid: string,
+    filePath: string,
+    filename?: string,
+    caption?: string,
+  ): Promise<void> {
+    if (!this.bot) {
+      logger.warn('Telegram bot not initialized');
+      return;
+    }
+    try {
+      const numericId = jid.replace(/^tg:/, '');
+      const fileBuffer = fs.readFileSync(filePath);
+      const name = filename || path.basename(filePath);
+      const ext = path.extname(name).toLowerCase();
+      const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+      if (imageExts.includes(ext)) {
+        // Send as photo so it renders inline in Telegram
+        await this.bot.api.sendPhoto(
+          numericId,
+          new InputFile(fileBuffer, name),
+          {
+            caption: caption,
+          },
+        );
+        logger.info({ jid, filename: name }, 'Telegram photo sent');
+      } else {
+        await this.bot.api.sendDocument(
+          numericId,
+          new InputFile(fileBuffer, name),
+          {
+            caption: caption,
+          },
+        );
+        logger.info({ jid, filename: name }, 'Telegram document sent');
+      }
+    } catch (err) {
+      logger.error({ jid, err }, 'Failed to send Telegram file');
     }
   }
 

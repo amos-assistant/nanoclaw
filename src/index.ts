@@ -54,6 +54,7 @@ import {
 } from './sender-allowlist.js';
 import { extractSessionCommand, handleSessionCommand, isSessionCommandAllowed } from './session-commands.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { getGroupModel, setGroupModel } from './group-settings.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -345,6 +346,7 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        model: getGroupModel(group.folder),
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -543,6 +545,45 @@ async function main(): Promise<void> {
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
+      // /model command: switch or show model for this group
+      if (
+        registeredGroups[chatJid] &&
+        msg.content.trim().startsWith('/model')
+      ) {
+        const parts = msg.content.trim().split(/\s+/);
+        const alias = parts[1]?.toLowerCase();
+        const group = registeredGroups[chatJid];
+        const channel = findChannel(channels, chatJid);
+        if (channel) {
+          const MODEL_LABELS: Record<string, string> = {
+            sonnet: 'Sonnet 4.6 (adaptive thinking)',
+            opus: 'Opus 4.6 (adaptive thinking)',
+            haiku: 'Haiku 4.5 (fast, no thinking)',
+          };
+          if (!alias) {
+            const current = getGroupModel(group.folder) || 'sonnet';
+            channel
+              .sendMessage(
+                chatJid,
+                `Current model: ${MODEL_LABELS[current] || current}`,
+              )
+              .catch(() => {});
+          } else if (MODEL_LABELS[alias]) {
+            setGroupModel(group.folder, alias);
+            channel
+              .sendMessage(chatJid, `Model switched to: ${MODEL_LABELS[alias]}`)
+              .catch(() => {});
+          } else {
+            channel
+              .sendMessage(
+                chatJid,
+                `Unknown model. Available:\n• sonnet — ${MODEL_LABELS.sonnet}\n• opus — ${MODEL_LABELS.opus}\n• haiku — ${MODEL_LABELS.haiku}`,
+              )
+              .catch(() => {});
+          }
+        }
+        return;
+      }
       // Sender allowlist drop mode: discard messages from denied senders before storing
       if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
         const cfg = loadSenderAllowlist();

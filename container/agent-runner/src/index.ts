@@ -16,7 +16,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { query, HookCallback, PreCompactHookInput, ThinkingConfig } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
 interface ContainerInput {
@@ -27,6 +27,22 @@ interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  model?: string;
+}
+
+type ModelAlias = 'sonnet' | 'opus' | 'haiku';
+
+const MODEL_CONFIG: Record<ModelAlias, { model: string; thinking: ThinkingConfig }> = {
+  sonnet: { model: 'claude-sonnet-4-6', thinking: { type: 'adaptive' } },
+  opus:   { model: 'claude-opus-4-6',   thinking: { type: 'adaptive' } },
+  haiku:  { model: 'claude-haiku-4-5-20251001', thinking: { type: 'disabled' } },
+};
+
+function resolveModel(alias?: string): { model: string; thinking: ThinkingConfig } {
+  if (alias && alias in MODEL_CONFIG) {
+    return MODEL_CONFIG[alias as ModelAlias];
+  }
+  return MODEL_CONFIG.sonnet;
 }
 
 interface ContainerOutput {
@@ -389,10 +405,15 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  const { model, thinking } = resolveModel(containerInput.model);
+  log(`Using model: ${model} (thinking: ${thinking.type})`);
+
   for await (const message of query({
     prompt: stream,
     options: {
       cwd: '/workspace/group',
+      model,
+      thinking,
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,

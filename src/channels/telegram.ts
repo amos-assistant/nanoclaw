@@ -75,6 +75,25 @@ export class TelegramChannel implements Channel {
       ctx.reply(`${ASSISTANT_NAME} is online.`);
     });
 
+    // Forward /model command to onMessage so index.ts can handle it
+    this.bot.command('model', (ctx) => {
+      if (!ctx.message) return;
+      const chatJid = `tg:${ctx.chat.id}`;
+      const args = ctx.match?.trim();
+      const content = args ? `/model ${args}` : '/model';
+      const timestamp = new Date(ctx.message.date * 1000).toISOString();
+      this.opts.onMessage(chatJid, {
+        id: ctx.message.message_id.toString(),
+        chat_jid: chatJid,
+        sender: ctx.from?.id.toString() || '',
+        sender_name: ctx.from?.first_name || ctx.from?.username || 'Unknown',
+        content,
+        timestamp,
+        is_from_me: false,
+        is_bot_message: false,
+      });
+    });
+
     this.bot.on('message:text', async (ctx) => {
       // Skip commands
       if (ctx.message.text.startsWith('/')) return;

@@ -494,21 +494,27 @@ async function main(): Promise<void> {
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
       // /model command: switch or show model for this group
-      if (registeredGroups[chatJid] && msg.content.trim().startsWith('/model')) {
+      if (
+        registeredGroups[chatJid] &&
+        msg.content.trim().startsWith('/model')
+      ) {
         const parts = msg.content.trim().split(/\s+/);
         const alias = parts[1]?.toLowerCase();
         const group = registeredGroups[chatJid];
         const channel = findChannel(channels, chatJid);
         if (channel) {
           const MODEL_LABELS: Record<string, string> = {
-            sonnet: 'Sonnet 4.6 (extended thinking)',
+            sonnet: 'Sonnet 4.6 (adaptive thinking)',
             opus: 'Opus 4.6 (adaptive thinking)',
             haiku: 'Haiku 4.5 (fast, no thinking)',
           };
           if (!alias) {
             const current = getGroupModel(group.folder) || 'sonnet';
             channel
-              .sendMessage(chatJid, `Current model: ${MODEL_LABELS[current] || current}`)
+              .sendMessage(
+                chatJid,
+                `Current model: ${MODEL_LABELS[current] || current}`,
+              )
               .catch(() => {});
           } else if (MODEL_LABELS[alias]) {
             setGroupModel(group.folder, alias);

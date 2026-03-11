@@ -65,10 +65,15 @@ function mdToHtml(text: string): string {
 
 function mimeType(ext: string): string {
   const map: Record<string, string> = {
-    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-    '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp',
-    '.pdf': 'application/pdf', '.txt': 'text/plain',
-    '.mp4': 'video/mp4', '.mp3': 'audio/mpeg',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.pdf': 'application/pdf',
+    '.txt': 'text/plain',
+    '.mp4': 'video/mp4',
+    '.mp3': 'audio/mpeg',
   };
   return map[ext.toLowerCase()] ?? 'application/octet-stream';
 }
@@ -84,10 +89,15 @@ function downloadFile(url: string, dest: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const protocol = url.startsWith('https') ? https : http;
     const out = fs.createWriteStream(dest);
-    protocol.get(url, (res) => {
-      res.pipe(out);
-      out.on('finish', resolve);
-    }).on('error', (err) => { fs.unlink(dest, () => {}); reject(err); });
+    protocol
+      .get(url, (res) => {
+        res.pipe(out);
+        out.on('finish', resolve);
+      })
+      .on('error', (err) => {
+        fs.unlink(dest, () => {});
+        reject(err);
+      });
   });
 }
 
@@ -108,7 +118,11 @@ export class MatrixChannel implements Channel {
   private homeserverUrl: string;
   private accessToken: string;
 
-  constructor(homeserverUrl: string, accessToken: string, opts: MatrixChannelOpts) {
+  constructor(
+    homeserverUrl: string,
+    accessToken: string,
+    opts: MatrixChannelOpts,
+  ) {
     this.homeserverUrl = homeserverUrl;
     this.accessToken = accessToken;
     this.opts = opts;
@@ -150,7 +164,7 @@ export class MatrixChannel implements Channel {
     this.client.on('room.message', async (roomId: string, event: any) => {
       if (!this.client) return;
       if (event.sender === this.botUserId) return;
-      const text = (event.content?.body as string ?? '').trim();
+      const text = ((event.content?.body as string) ?? '').trim();
       if (text === '!chatid') {
         await this.client.sendMessage(roomId, {
           msgtype: 'm.text',
@@ -160,7 +174,7 @@ export class MatrixChannel implements Channel {
       if (text === '!ping') {
         await this.client.sendMessage(roomId, {
           msgtype: 'm.text',
-          body: `${ASSISTANT_NAME} is online. Room is${await this.isEncrypted(roomId) ? '' : ' NOT'} end-to-end encrypted.`,
+          body: `${ASSISTANT_NAME} is online. Room is${(await this.isEncrypted(roomId)) ? '' : ' NOT'} end-to-end encrypted.`,
         });
       }
     });
@@ -172,7 +186,11 @@ export class MatrixChannel implements Channel {
 
       // Skip old events on startup
       const age = Date.now() - (event.origin_server_ts ?? 0);
-      if (age > STARTUP_GRACE_MS && Date.now() - this.startedAt < STARTUP_GRACE_MS) return;
+      if (
+        age > STARTUP_GRACE_MS &&
+        Date.now() - this.startedAt < STARTUP_GRACE_MS
+      )
+        return;
 
       const chatJid = `${JID_PREFIX}${roomId}`;
       const group = this.opts.registeredGroups()[chatJid];
@@ -184,7 +202,9 @@ export class MatrixChannel implements Channel {
       const emoji = relates.key as string;
       const sender = event.sender as string;
       const senderName = sender.split(':')[0].replace('@', '');
-      const timestamp = new Date(event.origin_server_ts ?? Date.now()).toISOString();
+      const timestamp = new Date(
+        event.origin_server_ts ?? Date.now(),
+      ).toISOString();
 
       this.opts.onMessage(chatJid, {
         id: event.event_id,
@@ -196,7 +216,10 @@ export class MatrixChannel implements Channel {
         is_from_me: false,
       });
 
-      logger.info({ chatJid, sender: senderName, emoji }, 'Matrix reaction received');
+      logger.info(
+        { chatJid, sender: senderName, emoji },
+        'Matrix reaction received',
+      );
     });
 
     await this.client.start();
@@ -215,14 +238,20 @@ export class MatrixChannel implements Channel {
 
     // Skip old events replayed on startup
     const age = Date.now() - (event.origin_server_ts ?? 0);
-    if (age > STARTUP_GRACE_MS && Date.now() - this.startedAt < STARTUP_GRACE_MS) return;
+    if (
+      age > STARTUP_GRACE_MS &&
+      Date.now() - this.startedAt < STARTUP_GRACE_MS
+    )
+      return;
 
     const chatJid = `${JID_PREFIX}${roomId}`;
     const content = event.content ?? {};
     const msgtype = content.msgtype as string;
     if (!msgtype) return;
 
-    const timestamp = new Date(event.origin_server_ts ?? Date.now()).toISOString();
+    const timestamp = new Date(
+      event.origin_server_ts ?? Date.now(),
+    ).toISOString();
     const sender = event.sender as string;
     const senderName = sender.split(':')[0].replace('@', '');
 
@@ -240,7 +269,7 @@ export class MatrixChannel implements Channel {
     let messageContent: string;
 
     if (msgtype === 'm.text') {
-      let text = content.body as string ?? '';
+      let text = (content.body as string) ?? '';
 
       // Normalise @bot mention → trigger pattern
       const botLocal = this.botUserId?.split(':')[0].replace('@', '') ?? '';
@@ -248,15 +277,16 @@ export class MatrixChannel implements Channel {
         text = `@${ASSISTANT_NAME} ${text}`;
       }
       messageContent = text;
-
     } else if (msgtype === 'm.image') {
       try {
         let imageBuffer: Buffer;
         // Detect mime type for file extension
-        const mime = content.info?.mimetype as string ?? 'image/jpeg';
+        const mime = (content.info?.mimetype as string) ?? 'image/jpeg';
         const extMap: Record<string, string> = {
-          'image/png': '.png', 'image/gif': '.gif',
-          'image/webp': '.webp', 'image/jpeg': '.jpg',
+          'image/png': '.png',
+          'image/gif': '.gif',
+          'image/webp': '.webp',
+          'image/jpeg': '.jpg',
         };
         const ext = extMap[mime] ?? '.jpg';
 
@@ -266,7 +296,9 @@ export class MatrixChannel implements Channel {
         } else if (content.url) {
           // Unencrypted room: direct download
           const httpUrl = this.client!.mxcToHttp(content.url as string);
-          const { data } = await this.client!.downloadContent(content.url as string);
+          const { data } = await this.client!.downloadContent(
+            content.url as string,
+          );
           imageBuffer = Buffer.from(data);
         } else {
           throw new Error('No url or file in image event');
@@ -281,7 +313,6 @@ export class MatrixChannel implements Channel {
         logger.warn({ err }, 'Failed to download Matrix image');
         messageContent = `[Image: ${content.body ?? 'photo'}]`;
       }
-
     } else if (msgtype === 'm.file') {
       messageContent = `[File: ${content.body ?? 'file'}]`;
     } else if (msgtype === 'm.audio') {
@@ -302,13 +333,24 @@ export class MatrixChannel implements Channel {
       is_from_me: false,
     });
 
-    logger.info({ chatJid, roomName, sender: senderName, encrypted: event.type === 'm.room.encrypted' }, 'Matrix message received');
+    logger.info(
+      {
+        chatJid,
+        roomName,
+        sender: senderName,
+        encrypted: event.type === 'm.room.encrypted',
+      },
+      'Matrix message received',
+    );
   }
 
   // ─── Sending ───────────────────────────────────────────────────────────────
 
   async sendMessage(jid: string, text: string): Promise<void> {
-    if (!this.client) { logger.warn('Matrix client not initialized'); return; }
+    if (!this.client) {
+      logger.warn('Matrix client not initialized');
+      return;
+    }
     try {
       const roomId = jid.replace(/^mx:/, '');
       for (const chunk of chunkText(text, MAX_CHUNK)) {
@@ -331,7 +373,10 @@ export class MatrixChannel implements Channel {
     filename?: string,
     caption?: string,
   ): Promise<void> {
-    if (!this.client) { logger.warn('Matrix client not initialized'); return; }
+    if (!this.client) {
+      logger.warn('Matrix client not initialized');
+      return;
+    }
     try {
       const roomId = jid.replace(/^mx:/, '');
       const name = filename ?? path.basename(filePath);
@@ -350,7 +395,10 @@ export class MatrixChannel implements Channel {
         info: { mimetype: mime, size: buffer.length },
       });
 
-      logger.info({ jid, filename: name }, `Matrix ${isImage ? 'photo' : 'file'} sent`);
+      logger.info(
+        { jid, filename: name },
+        `Matrix ${isImage ? 'photo' : 'file'} sent`,
+      );
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Matrix file');
     }
@@ -358,9 +406,13 @@ export class MatrixChannel implements Channel {
 
   // ─── Lifecycle ─────────────────────────────────────────────────────────────
 
-  isConnected(): boolean { return this.client !== null; }
+  isConnected(): boolean {
+    return this.client !== null;
+  }
 
-  ownsJid(jid: string): boolean { return jid.startsWith(JID_PREFIX); }
+  ownsJid(jid: string): boolean {
+    return jid.startsWith(JID_PREFIX);
+  }
 
   async disconnect(): Promise<void> {
     if (this.client) {
@@ -374,30 +426,42 @@ export class MatrixChannel implements Channel {
     if (!this.client || !isTyping) return;
     try {
       await this.client.setTyping(jid.replace(/^mx:/, ''), true, 5000);
-    } catch { /* non-fatal */ }
+    } catch {
+      /* non-fatal */
+    }
   }
 
   // ─── Utilities ─────────────────────────────────────────────────────────────
 
   private async getRoomName(roomId: string): Promise<string> {
     try {
-      const state = await this.client!.getRoomStateEvent(roomId, 'm.room.name', '');
+      const state = await this.client!.getRoomStateEvent(
+        roomId,
+        'm.room.name',
+        '',
+      );
       return state?.name ?? roomId;
-    } catch { return roomId; }
+    } catch {
+      return roomId;
+    }
   }
 
   private async isGroupRoom(roomId: string): Promise<boolean> {
     try {
       const members = await this.client!.getJoinedRoomMembers(roomId);
       return members.length > 2;
-    } catch { return true; }
+    } catch {
+      return true;
+    }
   }
 
   private async isEncrypted(roomId: string): Promise<boolean> {
     try {
       await this.client!.getRoomStateEvent(roomId, 'm.room.encryption', '');
       return true;
-    } catch { return false; }
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -406,7 +470,9 @@ export class MatrixChannel implements Channel {
 registerChannel('matrix', (opts: ChannelOpts) => {
   const env = readEnvFile(['MATRIX_HOMESERVER_URL', 'MATRIX_ACCESS_TOKEN']);
   if (!env.MATRIX_HOMESERVER_URL || !env.MATRIX_ACCESS_TOKEN) {
-    logger.debug('Matrix channel not configured (MATRIX_HOMESERVER_URL / MATRIX_ACCESS_TOKEN missing)');
+    logger.debug(
+      'Matrix channel not configured (MATRIX_HOMESERVER_URL / MATRIX_ACCESS_TOKEN missing)',
+    );
     return null;
   }
   return new MatrixChannel(env.MATRIX_HOMESERVER_URL, env.MATRIX_ACCESS_TOKEN, {

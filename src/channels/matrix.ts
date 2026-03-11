@@ -18,6 +18,7 @@
  */
 
 import fs from 'fs';
+import { spawn } from 'child_process';
 import path from 'path';
 import https from 'https';
 import http from 'http';
@@ -177,6 +178,28 @@ export class MatrixChannel implements Channel {
           body: `${ASSISTANT_NAME} is online. Room is${(await this.isEncrypted(roomId)) ? '' : ' NOT'} end-to-end encrypted.`,
         });
       }
+      if (text === '!usage') {
+        await this.client.sendMessage(roomId, {
+          msgtype: 'm.text',
+          body: 'https://claude.ai/settings/usage',
+        });
+      }
+      if (text === '!model' || text.startsWith('!model ')) {
+        const chatJid = `mx:${roomId}`;
+        const sender = event.sender as string;
+        const senderName = sender.split(':')[0].replace('@', '');
+        const args = text.slice('!model'.length).trim();
+        const content = args ? `/model ${args}` : '/model';
+        this.opts.onMessage(chatJid, {
+          id: event.event_id,
+          chat_jid: chatJid,
+          sender,
+          sender_name: senderName,
+          content,
+          timestamp: new Date(event.origin_server_ts ?? Date.now()).toISOString(),
+          is_from_me: false,
+        });
+      }
     });
 
     // ── Inbound reactions ────────────────────────────────────────────────────
@@ -316,7 +339,53 @@ export class MatrixChannel implements Channel {
     } else if (msgtype === 'm.file') {
       messageContent = `[File: ${content.body ?? 'file'}]`;
     } else if (msgtype === 'm.audio') {
-      messageContent = `[Audio: ${content.body ?? 'audio'}]`;
+      try {
+        let audioBuffer: Buffer;
+        if (content.file) {
+          // E2E encrypted room
+          audioBuffer = await this.client!.crypto.decryptMedia(content.file);
+        } else if (content.url) {
+          const { data } = await this.client!.downloadContent(content.url as string);
+          audioBuffer = Buffer.from(data);
+        } else {
+          throw new Error('No url or file in audio event');
+        }
+
+        const audioDir = path.join(GROUPS_DIR, group.folder, 'received_audio');
+        fs.mkdirSync(audioDir, { recursive: true });
+        const audioFilename = `audio_${Date.now()}.ogg`;
+        const audioPath = path.join(audioDir, audioFilename);
+        fs.writeFileSync(audioPath, audioBuffer);
+
+        // Transcribe locally with faster-whisper (non-blocking)
+        const scriptPath = path.resolve('scripts/transcribe.py');
+        const transcribedText = await new Promise<string>((resolve, reject) => {
+          const proc = spawn('python3', [scriptPath, audioPath]);
+          let stdout = '';
+          let stderr = '';
+          proc.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
+          proc.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+          const timer = setTimeout(() => { proc.kill(); reject(new Error('Transcription timeout')); }, 120_000);
+          proc.on('close', (code: number | null) => {
+            clearTimeout(timer);
+            if (code === 0 && stdout.trim()) resolve(stdout.trim());
+            else reject(new Error(stderr.trim() || 'Transcription failed'));
+          });
+        });
+
+        messageContent = `[Sprachnachricht: ${transcribedText}]`;
+
+        // Keep only the last 5 audio files
+        const audioFiles = fs.readdirSync(audioDir)
+          .filter((f: string) => f.startsWith('audio_') && f.endsWith('.ogg'))
+          .sort();
+        audioFiles.slice(0, Math.max(0, audioFiles.length - 5))
+          .forEach((f: string) => fs.unlinkSync(path.join(audioDir, f)));
+
+      } catch (err) {
+        logger.warn({ err }, 'Failed to process Matrix audio');
+        messageContent = `[Sprachnachricht: ${content.body ?? 'audio'} — Transkription fehlgeschlagen]`;
+      }
     } else if (msgtype === 'm.video') {
       messageContent = `[Video: ${content.body ?? 'video'}]`;
     } else {

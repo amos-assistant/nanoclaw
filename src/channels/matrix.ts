@@ -196,7 +196,9 @@ export class MatrixChannel implements Channel {
           sender,
           sender_name: senderName,
           content,
-          timestamp: new Date(event.origin_server_ts ?? Date.now()).toISOString(),
+          timestamp: new Date(
+            event.origin_server_ts ?? Date.now(),
+          ).toISOString(),
           is_from_me: false,
         });
       }
@@ -345,7 +347,9 @@ export class MatrixChannel implements Channel {
           // E2E encrypted room
           audioBuffer = await this.client!.crypto.decryptMedia(content.file);
         } else if (content.url) {
-          const { data } = await this.client!.downloadContent(content.url as string);
+          const { data } = await this.client!.downloadContent(
+            content.url as string,
+          );
           audioBuffer = Buffer.from(data);
         } else {
           throw new Error('No url or file in audio event');
@@ -363,9 +367,16 @@ export class MatrixChannel implements Channel {
           const proc = spawn('python3', [scriptPath, audioPath]);
           let stdout = '';
           let stderr = '';
-          proc.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
-          proc.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
-          const timer = setTimeout(() => { proc.kill(); reject(new Error('Transcription timeout')); }, 120_000);
+          proc.stdout.on('data', (d: Buffer) => {
+            stdout += d.toString();
+          });
+          proc.stderr.on('data', (d: Buffer) => {
+            stderr += d.toString();
+          });
+          const timer = setTimeout(() => {
+            proc.kill();
+            reject(new Error('Transcription timeout'));
+          }, 120_000);
           proc.on('close', (code: number | null) => {
             clearTimeout(timer);
             if (code === 0 && stdout.trim()) resolve(stdout.trim());
@@ -376,12 +387,13 @@ export class MatrixChannel implements Channel {
         messageContent = `[Sprachnachricht: ${transcribedText}]`;
 
         // Keep only the last 5 audio files
-        const audioFiles = fs.readdirSync(audioDir)
+        const audioFiles = fs
+          .readdirSync(audioDir)
           .filter((f: string) => f.startsWith('audio_') && f.endsWith('.ogg'))
           .sort();
-        audioFiles.slice(0, Math.max(0, audioFiles.length - 5))
+        audioFiles
+          .slice(0, Math.max(0, audioFiles.length - 5))
           .forEach((f: string) => fs.unlinkSync(path.join(audioDir, f)));
-
       } catch (err) {
         logger.warn({ err }, 'Failed to process Matrix audio');
         messageContent = `[Sprachnachricht: ${content.body ?? 'audio'} — Transkription fehlgeschlagen]`;

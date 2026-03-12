@@ -102,6 +102,43 @@ function downloadFile(url: string, dest: string): Promise<void> {
   });
 }
 
+
+/** Extract width/height from PNG or JPEG buffer (no external deps). */
+function imageDimensions(buf: Buffer): { w: number; h: number } | null {
+  // PNG: bytes 16-23 = width (4B BE) + height (4B BE)
+  if (buf[0] === 0x89 && buf[1] === 0x50) {
+    return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+  }
+  // JPEG: scan for SOFn markers (0xFFC0-0xFFC3)
+  if (buf[0] === 0xff && buf[1] === 0xd8) {
+    let i = 2;
+    while (i < buf.length - 9) {
+      if (buf[i] !== 0xff) { i++; continue; }
+      const marker = buf[i + 1];
+      if (marker >= 0xc0 && marker <= 0xc3) {
+        return { w: buf.readUInt16BE(i + 7), h: buf.readUInt16BE(i + 5) };
+      }
+      const segLen = buf.readUInt16BE(i + 2);
+      i += 2 + segLen;
+    }
+  }
+  // GIF: bytes 6-9 = width (2B LE) + height (2B LE)
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) {
+    return { w: buf.readUInt16LE(6), h: buf.readUInt16LE(8) };
+  }
+  // WebP: RIFF header, VP8 chunk
+  if (buf.length > 30 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') {
+    if (buf.toString('ascii', 12, 16) === 'VP8 ') {
+      return { w: buf.readUInt16LE(26) & 0x3fff, h: buf.readUInt16LE(28) & 0x3fff };
+    }
+    if (buf.toString('ascii', 12, 16) === 'VP8L') {
+      const bits = buf.readUInt32LE(21);
+      return { w: (bits & 0x3fff) + 1, h: ((bits >> 14) & 0x3fff) + 1 };
+    }
+  }
+  return null;
+}
+
 // ─── Channel ──────────────────────────────────────────────────────────────────
 
 export interface MatrixChannelOpts {
@@ -469,12 +506,26 @@ export class MatrixChannel implements Channel {
       const mxcUrl = await this.client.uploadContent(buffer, mime, name);
 
       const isImage = IMAGE_EXTS.has(ext);
+      const info: Record<string, any> = { mimetype: mime, size: buffer.length };
+      if (isImage) {
+        const dims = imageDimensions(buffer);
+        if (dims) { info.w = dims.w; info.h = dims.h; }
+      }
       await this.client.sendMessage(roomId, {
         msgtype: isImage ? 'm.image' : 'm.file',
-        body: caption ?? name,
+        body: name,
+        filename: name,
         url: mxcUrl,
-        info: { mimetype: mime, size: buffer.length },
+        info,
       });
+
+      // Send caption as separate text message if provided
+      if (caption) {
+        await this.client.sendMessage(roomId, {
+          msgtype: 'm.text',
+          body: caption,
+        });
+      }
 
       logger.info(
         { jid, filename: name },

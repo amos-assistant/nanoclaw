@@ -7,6 +7,9 @@
 
 // slack
 
+// matrix
+import './matrix.js';
+
 // telegram
 import './telegram.js';
 

@@ -333,6 +333,40 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+
+server.tool(
+  'send_file',
+  `Send a file or image to the user via Telegram.
+- Images (.jpg, .jpeg, .png, .gif, .webp) are sent as inline photos
+- All other files (PDF, etc.) are sent as documents
+- Path must be under /workspace/group/`,
+  {
+    file_path: z.string().describe('Absolute path to the file (must be under /workspace/group/)'),
+    filename: z.string().optional().describe('Display filename (defaults to actual filename)'),
+    caption: z.string().optional().describe('Optional caption/message text with the file'),
+  },
+  async (args) => {
+    let relativePath = args.file_path;
+    if (relativePath.startsWith('/workspace/group/')) {
+      relativePath = relativePath.slice('/workspace/group/'.length);
+    }
+
+    const data: Record<string, string | undefined> = {
+      type: 'send_file',
+      chatJid,
+      filePath: relativePath,
+      filename: args.filename,
+      caption: args.caption,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: 'File queued for sending.' }] };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
